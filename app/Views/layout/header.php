@@ -30,10 +30,17 @@
                         <i class="fa-solid fa-location-dot me-1"></i>
                         Lokasi
                     </a>
+                    <?php if (session()->get('logged_in')): ?>
+                    <span class="topbar-link fw-semibold text-dark">
+                        <i class="fa-regular fa-user me-1 text-primary"></i>
+                        <?= esc(session()->get('email') ?? '') ?>
+                    </span>
+                    <?php else: ?>
                     <a href="<?= base_url('auth/login') ?>" class="topbar-link fw-semibold text-dark">
                         <i class="fa-regular fa-user me-1 text-primary"></i>
                         Login
                     </a>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

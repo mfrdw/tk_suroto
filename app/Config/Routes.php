@@ -37,23 +37,23 @@ $routes->get('kontak', 'Home::kontak');
 
 
 // Keranjang
-$routes->group('keranjang', function($routes){
 
-    $routes->get('/', 'Keranjang::index');
-    $routes->post('tambah', 'Keranjang::tambah');
-    $routes->post('update', 'Keranjang::update');
-    $routes->get('hapus/(:num)', 'Keranjang::hapus/$1');
-    $routes->get('clear', 'Keranjang::clear');
 
-});
+$routes->get('keranjang', 'Controller_Keranjang::index');
+$routes->post('keranjang/tambah', 'Controller_Keranjang::tambah');
+$routes->post('keranjang/update', 'Controller_Keranjang::update');
+$routes->post('keranjang/hapus/(:num)', 'Controller_Keranjang::hapus/$1');
+$routes->post('keranjang/clear', 'Controller_Keranjang::clear');
+
+
 
 
 // Wishlist
 $routes->group('wishlist', function($routes){
 
-    $routes->get('/', 'Wishlist::index');
-    $routes->get('tambah/(:num)', 'Wishlist::tambah/$1');
-    $routes->get('hapus/(:num)', 'Wishlist::hapus/$1');
+$routes->get('wishlist', 'Controller_Wishlist::index');
+$routes->post('wishlist/tambah/(:num)', 'Controller_:tambah/$1');
+$routes->post('wishlist/hapus/(:num)', 'Controller_:hapus/$1');
 
 });
 
@@ -87,13 +87,13 @@ $routes->group('pesanan', function($routes){
 
 $routes->group('auth', function($routes){
 
-    $routes->get('login', 'Auth::login');
-    $routes->post('login-process', 'Auth::login_process');
+    $routes->get('login', 'Controller_Auth::login');
+    $routes->post('login-process', 'Controller_Auth::login_process');
 
-    $routes->get('register', 'Auth::register');
-    $routes->post('register-process', 'Auth::register_process');
+    $routes->get('register', 'Controller_Auth::register');
+    $routes->post('register-process', 'Controller_Auth::register_process');
 
-    $routes->get('logout', 'Auth::logout');
+    $routes->get('logout', 'Controller_Auth::logout');
 
 });
 

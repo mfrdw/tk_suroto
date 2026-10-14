@@ -2,73 +2,75 @@
 
 namespace App\Controllers;
 
-use App\Models\Wishlist_model;
-use App\Models\Konfigurasi_model;
+use App\Models\Models_Keranjang_Wishlist;
+use App\Models\Models_Produk_Kategori;
+use App\Models\Models_Konfigurasi;
 
-class Wishlist extends BaseController
+class Controller_Wishlist extends BaseController
 {
+    protected $wishlistModel;
+    protected $produkModel;
+    protected $konfigurasiModel;
+
     public function __construct()
     {
-        $this->Wishlist_model = new Wishlist_model();
-        $this->Konfigurasi_model = new Konfigurasi_model();
+        $this->wishlistModel = new Models_Keranjang_Wishlist();
+        $this->produkModel = new Models_Produk_Kategori();
+        $this->konfigurasiModel = new Models_Konfigurasi();
+        helper(['form', 'url']);
+    }
+
+    private function requireUser($postOnly = false)
+    {
+        if (!session()->get('logged_in') || !session()->get('id_user')) {
+            return redirect()->to(base_url('auth/login'));
+        }
+        if ($postOnly && strtolower($this->request->getMethod()) !== 'post') {
+            return $this->response->setStatusCode(405)->setHeader('Allow', 'POST');
+        }
+        return null;
     }
 
     public function index()
     {
-        if (!session()->get('logged_in')) {
-            return redirect()->to('/auth/login');
-        }
-        
-        $id_user = session()->get('id_user');
-        $data = [
+        if ($response = $this->requireUser()) return $response;
+        return view('wishlist/index', [
             'title' => 'Wishlist - Toko Suroto',
-            'konfigurasi' => $this->Konfigurasi_model->getKonfigurasi(),
-            'wishlist' => $this->Wishlist_model->getWishlistByUser($id_user),
-        ];
-        return view('wishlist/index', $data);
+            'konfigurasi' => $this->konfigurasiModel->getKonfigurasi(),
+            'wishlist' => $this->wishlistModel->getWishlistByUser(session()->get('id_user')),
+        ]);
     }
 
     public function tambah($id_produk)
     {
-        if (!session()->get('logged_in')) {
-            return redirect()->to('/auth/login');
+        if ($response = $this->requireUser(true)) return $response;
+        $id_produk = filter_var($id_produk, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!$id_produk || !$this->produkModel->getProdukById($id_produk)) {
+            return redirect()->to(base_url('wishlist'))->with('error', 'Produk tidak ditemukan.');
         }
-        
         $id_user = session()->get('id_user');
-        
-        // Cek apakah sudah ada di wishlist
-        $existing = $this->Wishlist_model->checkProdukDiWishlist($id_user, $id_produk);
-        
-        if ($existing) {
-            session()->setFlashdata('info', 'Produk sudah ada di wishlist.');
-        } else {
-            $this->Wishlist_model->insert([
-                'id_user' => $id_user,
-                'id_produk' => $id_produk,
-            ]);
-            session()->setFlashdata('success', 'Produk berhasil ditambahkan ke wishlist.');
+        if ($this->wishlistModel->checkProdukDiWishlist($id_user, $id_produk)) {
+            return redirect()->to(base_url('wishlist'))->with('info', 'Produk sudah ada di wishlist.');
         }
-        
-        return redirect()->back();
+        // Jangan gunakan insert() di sini: tabel default model gabungan adalah keranjang.
+        if (!$this->wishlistModel->tambahWishlist($id_user, $id_produk)) {
+            return redirect()->to(base_url('wishlist'))->with('error', 'Produk belum berhasil disimpan. Silakan coba lagi.');
+        }
+        return redirect()->to(base_url('wishlist'))->with('success', 'Produk berhasil ditambahkan ke wishlist.');
     }
 
     public function hapus($id)
     {
-        if (!session()->get('logged_in')) {
-            return redirect()->to('/auth/login');
-        }
-        
+        if ($response = $this->requireUser(true)) return $response;
+        $id = filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $item = $id ? $this->wishlistModel->getWishlistById($id) : null;
         $id_user = session()->get('id_user');
-        $wishlist = $this->Wishlist_model->getWishlistById($id);
-        
-        if (!$wishlist || $wishlist['id_user'] != $id_user) {
-            session()->setFlashdata('error', 'Item tidak ditemukan.');
-            return redirect()->back();
+        if (!$item || (string) $item['id_user'] !== (string) $id_user) {
+            return redirect()->to(base_url('wishlist'))->with('error', 'Item tidak ditemukan.');
         }
-        
-        $this->Wishlist_model->delete($id);
-        session()->setFlashdata('success', 'Produk berhasil dihapus dari wishlist.');
-        
-        return redirect()->to('/wishlist');
+        if (!$this->wishlistModel->hapusWishlist($id, $id_user)) {
+            return redirect()->to(base_url('wishlist'))->with('error', 'Item belum berhasil dihapus. Silakan coba lagi.');
+        }
+        return redirect()->to(base_url('wishlist'))->with('success', 'Produk berhasil dihapus dari wishlist.');
     }
 }

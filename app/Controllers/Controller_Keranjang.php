@@ -2,129 +2,125 @@
 
 namespace App\Controllers;
 
-use App\Models\Keranjang_model;
-use App\Models\Produk_model;
-use App\Models\Konfigurasi_model;
+use App\Models\Models_Keranjang_Wishlist;
+use App\Models\Models_Produk_Kategori;
+use App\Models\Models_Konfigurasi;
 
-class Keranjang extends BaseController
+class Controller_Keranjang extends BaseController
 {
+    protected $keranjangModel;
+    protected $produkModel;
+    protected $konfigurasiModel;
+
     public function __construct()
     {
-        $this->Keranjang_model = new Keranjang_model();
-        $this->Produk_model = new Produk_model();
-        $this->Konfigurasi_model = new Konfigurasi_model();
+        $this->keranjangModel = new Models_Keranjang_Wishlist();
+        $this->produkModel = new Models_Produk_Kategori();
+        $this->konfigurasiModel = new Models_Konfigurasi();
         helper(['form', 'url']);
+    }
+
+    private function requireUser($postOnly = false)
+    {
+        if (!session()->get('logged_in') || !session()->get('id_user')) {
+            return redirect()->to(base_url('auth/login'));
+        }
+        if ($postOnly && strtolower($this->request->getMethod()) !== 'post') {
+            return $this->response->setStatusCode(405)->setHeader('Allow', 'POST');
+        }
+        return null;
+    }
+
+    private function integer($value, $min = 1)
+    {
+        return is_scalar($value)
+            ? filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => $min]])
+            : false;
     }
 
     public function index()
     {
-        if (!session()->get('logged_in')) {
-            return redirect()->to('/auth/login');
-        }
-        
+        if ($response = $this->requireUser()) return $response;
         $id_user = session()->get('id_user');
-        $data = [
+        return view('keranjang/index', [
             'title' => 'Keranjang Belanja - Toko Suroto',
-            'konfigurasi' => $this->Konfigurasi_model->getKonfigurasi(),
-            'keranjang' => $this->Keranjang_model->getKeranjangByUser($id_user),
-            'total' => $this->Keranjang_model->getTotalKeranjang($id_user),
-        ];
-        return view('keranjang/index', $data);
+            'konfigurasi' => $this->konfigurasiModel->getKonfigurasi(),
+            'keranjang' => $this->keranjangModel->getKeranjangByUser($id_user),
+            'total' => $this->keranjangModel->getTotalKeranjang($id_user),
+        ]);
     }
 
     public function tambah()
     {
-        if (!session()->get('logged_in')) {
-            return redirect()->to('/auth/login');
-        }
-        
+        if ($response = $this->requireUser(true)) return $response;
         $id_user = session()->get('id_user');
-        $id_produk = $this->request->getPost('id_produk');
-        $qty = $this->request->getPost('qty') ?? 1;
-        
-        // Cek stok
-        $produk = $this->Produk_model->getProdukById($id_produk);
-        if (!$produk) {
-            session()->setFlashdata('error', 'Produk tidak ditemukan.');
-            return redirect()->back();
+        $id_produk = $this->integer($this->request->getPost('id_produk'));
+        $qty = $this->integer($this->request->getPost('qty') ?? 1);
+        $target = $this->request->getPost('redirect');
+        $target = in_array($target, ['keranjang', 'wishlist', 'produk'], true) ? $target : 'keranjang';
+        if ($id_produk === false || $qty === false) {
+            return redirect()->to(base_url($target))->with('error', 'Produk dan jumlah harus berupa angka bulat positif.');
         }
-        
-        if ($qty > $produk['stok']) {
-            session()->setFlashdata('error', 'Jumlah melebihi stok yang tersedia.');
-            return redirect()->back();
+        $produk = $this->produkModel->getProdukById($id_produk);
+        if (!$produk) return redirect()->to(base_url($target))->with('error', 'Produk tidak ditemukan.');
+        $stok = max(0, (int) $produk['stok']);
+        $existing = $this->keranjangModel->checkProdukDiKeranjang($id_user, $id_produk);
+        $oldQty = $existing ? max(0, (int) $existing['qty']) : 0;
+        // Membandingkan selisih menghindari penjumlahan qty yang melebihi integer.
+        if ($qty > $stok || $oldQty > $stok - $qty) {
+            return redirect()->to(base_url($target))->with('error', 'Jumlah total melebihi stok yang tersedia.');
         }
-        
-        // Cek apakah produk sudah ada di keranjang
-        $existing = $this->Keranjang_model->checkProdukDiKeranjang($id_user, $id_produk);
-        
-        if ($existing) {
-            $new_qty = $existing['qty'] + $qty;
-            if ($new_qty > $produk['stok']) {
-                session()->setFlashdata('error', 'Jumlah total melebihi stok yang tersedia.');
-                return redirect()->back();
-            }
-            $this->Keranjang_model->update($existing['id_keranjang'], ['qty' => $new_qty]);
-        } else {
-            $this->Keranjang_model->insert([
-                'id_user' => $id_user,
-                'id_produk' => $id_produk,
-                'qty' => $qty,
-            ]);
-        }
-        
-        session()->setFlashdata('success', 'Produk berhasil ditambahkan ke keranjang.');
-        
-        $redirect = $this->request->getPost('redirect') ?? 'keranjang';
-        return redirect()->to('/' . $redirect);
+        $result = $existing
+            ? $this->keranjangModel->update($existing['id_keranjang'], ['qty' => $oldQty + $qty])
+            : $this->keranjangModel->insert(['id_user' => $id_user, 'id_produk' => $id_produk, 'qty' => $qty]);
+        if ($result === false) return redirect()->to(base_url($target))->with('error', 'Produk belum berhasil ditambahkan. Silakan coba lagi.');
+        return redirect()->to(base_url($target))->with('success', 'Produk berhasil ditambahkan ke keranjang.');
     }
 
     public function update()
     {
-        $id_keranjang = $this->request->getPost('id_keranjang');
-        $qty = $this->request->getPost('qty');
-        
-        $keranjang = $this->Keranjang_model->getKeranjangById($id_keranjang);
-        
-        if (!$keranjang || $keranjang['id_user'] != session()->get('id_user')) {
-            session()->setFlashdata('error', 'Item tidak ditemukan.');
-            return redirect()->back();
+        if ($response = $this->requireUser(true)) return $response;
+        $id = $this->integer($this->request->getPost('id_keranjang'));
+        $qty = $this->integer($this->request->getPost('qty'), 0);
+        if ($id === false || $qty === false) {
+            return redirect()->to(base_url('keranjang'))->with('error', 'Jumlah harus berupa angka bulat, minimal 0.');
         }
-        
-        if ($qty <= 0) {
-            $this->Keranjang_model->delete($id_keranjang);
+        $item = $this->keranjangModel->getKeranjangById($id);
+        if (!$item || (string) $item['id_user'] !== (string) session()->get('id_user')) {
+            return redirect()->to(base_url('keranjang'))->with('error', 'Item tidak ditemukan.');
+        }
+        if ($qty === 0) {
+            $result = $this->keranjangModel->delete($id);
         } else {
-            $produk = $this->Produk_model->getProdukById($keranjang['id_produk']);
-            if ($qty > $produk['stok']) {
-                session()->setFlashdata('error', 'Jumlah melebihi stok yang tersedia.');
-                return redirect()->back();
+            $produk = $this->produkModel->getProdukById($item['id_produk']);
+            if (!$produk) return redirect()->to(base_url('keranjang'))->with('error', 'Produk tidak tersedia. Silakan hapus dari keranjang.');
+            if ($qty > max(0, (int) $produk['stok'])) {
+                return redirect()->to(base_url('keranjang'))->with('error', 'Jumlah melebihi stok yang tersedia.');
             }
-            $this->Keranjang_model->update($id_keranjang, ['qty' => $qty]);
+            $result = $this->keranjangModel->update($id, ['qty' => $qty]);
         }
-        
-        return redirect()->to('/keranjang');
+        if ($result === false) return redirect()->to(base_url('keranjang'))->with('error', 'Perubahan belum berhasil disimpan.');
+        return redirect()->to(base_url('keranjang'))->with('success', $qty === 0 ? 'Item berhasil dihapus.' : 'Jumlah produk berhasil diperbarui.');
     }
 
     public function hapus($id)
     {
-        $keranjang = $this->Keranjang_model->getKeranjangById($id);
-        
-        if (!$keranjang || $keranjang['id_user'] != session()->get('id_user')) {
-            session()->setFlashdata('error', 'Item tidak ditemukan.');
-            return redirect()->back();
+        if ($response = $this->requireUser(true)) return $response;
+        $id = $this->integer($id);
+        $item = $id !== false ? $this->keranjangModel->getKeranjangById($id) : null;
+        if (!$item || (string) $item['id_user'] !== (string) session()->get('id_user')) {
+            return redirect()->to(base_url('keranjang'))->with('error', 'Item tidak ditemukan.');
         }
-        
-        $this->Keranjang_model->delete($id);
-        session()->setFlashdata('success', 'Item berhasil dihapus dari keranjang.');
-        
-        return redirect()->to('/keranjang');
+        if (!$this->keranjangModel->delete($id)) return redirect()->to(base_url('keranjang'))->with('error', 'Item belum berhasil dihapus.');
+        return redirect()->to(base_url('keranjang'))->with('success', 'Item berhasil dihapus dari keranjang.');
     }
 
     public function clear()
     {
-        $id_user = session()->get('id_user');
-        $this->Keranjang_model->clearKeranjang($id_user);
-        
-        session()->setFlashdata('success', 'Keranjang berhasil dikosongkan.');
-        return redirect()->to('/keranjang');
+        if ($response = $this->requireUser(true)) return $response;
+        if (!$this->keranjangModel->clearKeranjang(session()->get('id_user'))) {
+            return redirect()->to(base_url('keranjang'))->with('error', 'Keranjang belum berhasil dikosongkan.');
+        }
+        return redirect()->to(base_url('keranjang'))->with('success', 'Keranjang berhasil dikosongkan.');
     }
 }
